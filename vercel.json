@@ -1,4 +1,8 @@
 {
   "outputDirectory": "frontend",
-  "buildCommand": null
+  "buildCommand": null,
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
