@@ -8,10 +8,13 @@ import numpy as np
 import faiss
 from openai import OpenAI
 from dotenv import load_dotenv
+from banks import detect_bank
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger(__name__)
+
+ENTITY_FILTER_MIN = 5  # fall back to full set if entity filter yields fewer than this
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "index.faiss")
@@ -120,7 +123,34 @@ def search(query: str, top_k: int = 10) -> dict:
 
     total_in_range = len(filtered_indices)
 
-    logger.info("Search — query=%r filtered=%d/%d", query, len(filtered_indices), len(_metadata))
+    # --- bank entity filter ---
+    bank = detect_bank(query)
+    entity_applied = False
+    if bank and filtered_indices:
+        aliases_lower = [a.lower() for a in bank["aliases"]]
+        entity_indices = [
+            i for i in filtered_indices
+            if any(
+                alias in (_metadata[i].get("title", "") + " " + _metadata[i].get("snippet", "")).lower()
+                for alias in aliases_lower
+            )
+        ]
+        if len(entity_indices) >= ENTITY_FILTER_MIN:
+            logger.info(
+                "Bank entity filter: %r → %d articles (from %d)",
+                bank["canonical"], len(entity_indices), len(filtered_indices),
+            )
+            filtered_indices = entity_indices
+            entity_applied = True
+            params["entity"] = bank["canonical"]
+        else:
+            logger.info(
+                "Bank entity filter for %r yielded only %d results — skipping filter",
+                bank["canonical"], len(entity_indices),
+            )
+
+    logger.info("Search — query=%r filtered=%d/%d entity_filter=%s",
+                query, len(filtered_indices), len(_metadata), entity_applied)
 
     if not filtered_indices:
         logger.info("No articles matched date filter")
