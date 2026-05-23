@@ -3,6 +3,7 @@ import json
 import logging
 import pickle
 import re
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
 from datetime import datetime, date
 
 import numpy as np
@@ -15,6 +16,24 @@ from banks import detect_bank
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=30.0)
 logger = logging.getLogger(__name__)
+
+# Shared pool — avoids per-call executor creation which caused deadlocks
+_pool = ThreadPoolExecutor(max_workers=10)
+
+# Azerbaijani diacritic → ASCII so "gomruk" matches "gömrük", "socar" matches "SOCAR", etc.
+_AZ_TO_LATIN = str.maketrans({
+    'ə': 'e', 'Ə': 'e',
+    'ö': 'o', 'Ö': 'o',
+    'ü': 'u', 'Ü': 'u',
+    'ğ': 'g', 'Ğ': 'g',
+    'ş': 's', 'Ş': 's',
+    'ç': 'c', 'Ç': 'c',
+    'ı': 'i', 'İ': 'i',
+})
+
+def _fold(text: str) -> str:
+    """Fold Azerbaijani diacritics to ASCII equivalents."""
+    return text.translate(_AZ_TO_LATIN)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "index.faiss")
@@ -38,8 +57,8 @@ _bm25: BM25Okapi | None = None
 # ---------------------------------------------------------------------------
 
 def _tokenize(text: str) -> list[str]:
-    """Lowercase + extract alphabetic tokens (handles Azerbaijani chars)."""
-    return re.findall(r"[a-zəüöğşçıa-zа-яё]{2,}", text.lower())
+    """Fold Azerbaijani diacritics then extract lowercase alphabetic tokens."""
+    return re.findall(r"[a-z]{2,}", _fold(text).lower())
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +246,12 @@ def search(query: str, top_k: int = 10) -> dict:
     if _index is None:
         load_index()
 
-    # 1. Parse query
-    params = parse_query(query)
+    # 1. Parse query + start HyDE generation in parallel using shared pool
+    fut_parse = _pool.submit(parse_query, query)
+    fut_hyde  = _pool.submit(generate_hyde, query)
+    done, _ = wait([fut_parse, fut_hyde], timeout=28, return_when=FIRST_EXCEPTION)
+    params    = fut_parse.result()
+    hyde_doc  = fut_hyde.result()
     topic = params.get("topic") or query
     date_from = _to_date(params.get("date_from"))
     date_to = _to_date(params.get("date_to"))
@@ -249,18 +272,19 @@ def search(query: str, top_k: int = 10) -> dict:
 
     total_in_range = len(filtered_indices)
 
-    # 3. Bank entity filter
-    bank = detect_bank(query)
+    # 3. Bank entity filter — normalize both query and article text so
+    #    "accessbank" matches "AccessBank", "pasa" matches "PAŞA", etc.
+    bank = detect_bank(_fold(query))
     entity_applied = False
     if bank and filtered_indices:
-        aliases_lower = [a.lower() for a in bank["aliases"]]
+        aliases_folded = [_fold(a).lower() for a in bank["aliases"]]
         entity_indices = [
             i for i in filtered_indices
             if any(
-                alias in (
+                alias in _fold(
                     _metadata[i].get("title", "") + " " + _metadata[i].get("snippet", "")
                 ).lower()
-                for alias in aliases_lower
+                for alias in aliases_folded
             )
         ]
         if len(entity_indices) == 0:
@@ -280,8 +304,7 @@ def search(query: str, top_k: int = 10) -> dict:
     if not filtered_indices:
         return {"results": [], "params": params, "total_in_range": 0}
 
-    # 4. HyDE — generate hypothetical article, embed it
-    hyde_doc = generate_hyde(topic)
+    # 4. Embed the pre-fetched HyDE document
     query_vec = _embed(hyde_doc)
 
     # 5. Semantic retrieval via FAISS over filtered subset
@@ -360,11 +383,14 @@ def search(query: str, top_k: int = 10) -> dict:
             "_idx": idx,
         })
 
-    # 10. GPT re-ranking — verify each candidate is genuinely relevant
+    # 10. GPT re-ranking — skip when entity filter already guarantees precision
     sentiment = params.get("sentiment")
-    reranked = rerank(query, candidates, sentiment)
+    if entity_applied and not sentiment:
+        logger.info("Re-ranker skipped (entity filter active, no sentiment)")
+        reranked = candidates
+    else:
+        reranked = rerank(query, candidates, sentiment)
 
-    # 11. Trust the re-ranker as the sole quality gate
     results = reranked
 
     # 12. Return top_k

@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -49,7 +50,7 @@ async def search_news(req: SearchRequest, request: Request):
     client_ip = request.client.host if request.client else "unknown"
     logger.info("Search request from %s — query=%r top_k=%d", client_ip, req.query, req.top_k)
     try:
-        result = search(req.query, req.top_k)
+        result = await asyncio.to_thread(search, req.query, req.top_k)
         logger.info("Search complete — %d results returned", len(result.get("results", [])))
         return result
     except Exception as e:
@@ -60,16 +61,16 @@ async def search_news(req: SearchRequest, request: Request):
 @app.get("/api/keywords")
 async def global_keywords(top_n: int = Query(default=20, ge=1, le=100)):
     logger.info("Global keywords request — top_n=%d", top_n)
-    kw = extract_keywords(top_n=top_n)
+    kw = await asyncio.to_thread(extract_keywords, top_n=top_n)
     return {"keywords": [{"term": k, "count": c} for k, c in kw]}
 
 
 @app.post("/api/keywords/search")
 async def keywords_for_search(req: SearchRequest):
     logger.info("Keywords-for-search request — query=%r", req.query)
-    result = search(req.query, top_k=50)
+    result = await asyncio.to_thread(search, req.query, 50)
     snippets = [f"{r['title']} {r['snippet']}" for r in result["results"]]
-    kw = extract_keywords(articles=snippets if snippets else None, top_n=20)
+    kw = await asyncio.to_thread(extract_keywords, articles=snippets if snippets else None, top_n=20)
     return {"keywords": [{"term": k, "count": c} for k, c in kw]}
 
 

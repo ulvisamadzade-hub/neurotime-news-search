@@ -140,11 +140,17 @@ BANKS = [
 ]
 
 
+_AZ = str.maketrans({
+    'ə':'e','Ə':'e','ö':'o','Ö':'o','ü':'u','Ü':'u',
+    'ğ':'g','Ğ':'g','ş':'s','Ş':'s','ç':'c','Ç':'c','ı':'i','İ':'i',
+})
+
 def detect_bank(query: str) -> dict | None:
-    """Return the matched bank entry if any alias appears in the query, else None."""
-    q = query.lower()
+    """Return the matched bank entry if any alias appears in the query, else None.
+    Normalizes Azerbaijani diacritics so 'pasa' matches 'PAŞA', etc."""
+    q = query.translate(_AZ).lower()
     for bank in BANKS:
         for alias in bank["aliases"]:
-            if alias.lower() in q:
+            if alias.translate(_AZ).lower() in q:
                 return bank
     return None
