@@ -1,0 +1,22 @@
+# Secrets and credentials
+.env
+*.env
+
+# Dataset (private, not for public repo)
+data/
+*.xlsx
+*.csv
+
+# FAISS index and metadata (generated locally from dataset)
+*.faiss
+*.pkl
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# macOS
+.DS_Store
