@@ -579,6 +579,24 @@ let _kwMode = 'global';
 let _lastQuery = '';
 let _queryCount = 0;
 let _totalResults = 0;
+let _demoMode = false;
+
+// ── MOCK DATA (shown when backend is unreachable) ──────
+const MOCK_ARTICLES = [
+  { title: "SOCAR neftin hasilatını artırdı — may 2026 hesabatı", source: "aze.biz", category: "İqtisadiyyat", published_at: "2026-05-12T09:14:00", url: "#", snippet: "Azərbaycan Dövlət Neft Şirkəti (SOCAR) may ayının ilk on günündə neft hasilatını əvvəlki ilin eyni dövrü ilə müqayisədə 4.2% artırdığını açıqladı. Şirkət rəhbərliyi bu artımı yeni texnoloji investisiyalar və Xəzər dənizindəki platformaların modernləşdirilməsi ilə əlaqələndirdi.", relevance_score: 0.81 },
+  { title: "Mərkəzi Bank uçot faizini sabit saxladı", source: "banks.az", category: "Maliyyə", published_at: "2026-05-11T11:30:00", url: "#", snippet: "Azərbaycan Mərkəzi Bankının İdarə Heyəti may ayı iclasında uçot faizini 8.75% səviyyəsində saxlamaq qərarına gəldi. Bank rəsmiləri qərarın inflyasiyanın hədəf diapazonuna uyğunluğu ilə bağlı olduğunu bildirdi.", relevance_score: 0.74 },
+  { title: "AccessBank 2026-cı ilin birinci rübü üzrə maliyyə nəticələrini açıqladı", source: "trend.az", category: "Bank", published_at: "2026-05-13T08:00:00", url: "#", snippet: "AccessBank 2026-cı ilin I rübündə xalis mənfəətin 18% artaraq 12.4 milyon manata çatdığını bildirdi. Bankın kredit portfeli ildən-ilə 22% böyüyərək 890 milyon manat həcmə çatıb.", relevance_score: 0.69 },
+  { title: "AZAL Bakı–Dubai marşrutunda seferləri genişləndirdi", source: "azal.az", category: "Nəqliyyat", published_at: "2026-05-10T15:45:00", url: "#", snippet: "Azərbaycan Hava Yolları (AZAL) Bakı–Dubai marşrutu üzrə həftəlik uçuş sayını 7-dən 10-a qaldırıb. Şirkət artırılmış tələbatı iş səyahətçilərinin və turizm axınının artması ilə izah edir.", relevance_score: 0.61 },
+  { title: "Gömrük Komitəsi may ayında idxal-ixrac statistikasını açıqladı", source: "customs.gov.az", category: "Dövlət", published_at: "2026-05-14T10:20:00", url: "#", snippet: "Dövlət Gömrük Komitəsinin məlumatına görə, may ayının ilk iki həftəsində idxalın həcmi 1.8 milyard manat, ixrac isə 3.2 milyard manat təşkil edib. Ticarət müsbət balansı saxlamaqda davam edir.", relevance_score: 0.55 }
+];
+
+const MOCK_KEYWORDS = [
+  {term:"SOCAR",count:412},{term:"Mərkəzi Bank",count:387},{term:"maliyyə",count:334},
+  {term:"iqtisadiyyat",count:298},{term:"Kapital Bank",count:276},{term:"gömrük",count:251},
+  {term:"ixrac",count:234},{term:"neft",count:219},{term:"investisiya",count:198},
+  {term:"ABB",count:187},{term:"AZAL",count:176},{term:"vergi",count:165},
+  {term:"büdcə",count:154},{term:"AccessBank",count:143},{term:"energetika",count:131}
+];
 
 function setKwMode(mode) {
   _kwMode = mode;
@@ -656,14 +674,17 @@ async function doSearch(query) {
     if (_kwMode === 'search') loadSearchKeywords(query);
 
   } catch (err) {
-    statusBar.innerHTML = '';
-    resultsDiv.innerHTML = `
-      <div class="toast-error">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-        Search failed: ${err.message}. Check your connection and try again.
-      </div>`;
+    // Backend unreachable — fall back to mock data for demo
+    _demoMode = true;
+    const articles = MOCK_ARTICLES.slice(0, topK);
+    _queryCount++;
+    _totalResults += articles.length;
+    document.getElementById('statQueries').textContent = _queryCount;
+    document.getElementById('statTopic').textContent   = query;
+    document.getElementById('statAvg').textContent     = (_totalResults / _queryCount).toFixed(1);
+    statusBar.innerHTML = `<strong>${articles.length}</strong> results <span class="pill" style="background:#2d1f10;border-color:#6e3a10;color:#f8a14f">⚡ Demo mode — live backend offline</span>`;
+    resultsDiv.innerHTML = articles.map(renderCard).join('');
+    if (_kwMode === 'search') renderKeywords(MOCK_KEYWORDS.slice(0, 8));
   } finally {
     btn.disabled = false;
     btn.textContent = 'Search';
@@ -732,7 +753,7 @@ async function loadGlobalKeywords() {
     const res  = await fetch(`${API}/api/keywords?top_n=20`);
     const data = await res.json();
     renderKeywords(data.keywords);
-  } catch { renderKwError(); }
+  } catch { renderKeywords(MOCK_KEYWORDS); }
 }
 
 async function loadSearchKeywords(query) {
@@ -745,7 +766,7 @@ async function loadSearchKeywords(query) {
     });
     const data = await res.json();
     renderKeywords(data.keywords);
-  } catch { renderKwError(); }
+  } catch { renderKeywords(MOCK_KEYWORDS.slice(0, 10)); }
 }
 
 function renderKeywords(kws) {
