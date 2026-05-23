@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -83,7 +84,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔍 Axtarılır...")
 
     try:
-        result = search(query, top_k=MAX_RESULTS)
+        result = await asyncio.to_thread(search, query, top_k=MAX_RESULTS)
     except Exception as e:
         logger.error("Search error: %s", e)
         await update.message.reply_text("❌ Axtarış zamanı xəta baş verdi. Yenidən cəhd edin.")
@@ -141,7 +142,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("kw::"):
         search_query = data[4:]
-        result = search(search_query, top_k=50)
+        result = await asyncio.to_thread(search, search_query, top_k=50)
         snippets = [f"{r['title']} {r['snippet']}" for r in result["results"]]
         kw = extract_keywords(articles=snippets if snippets else None, top_n=15)
         lines = "\n".join(f"• *{term}*: {count}" for term, count in kw)

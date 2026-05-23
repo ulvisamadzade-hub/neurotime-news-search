@@ -3,290 +3,608 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Neurotime Xəbər Axtarışı</title>
+  <title>ORACULO — AI News Intelligence</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg: #080c14;
+      --surface: #0d1117;
+      --surface2: #161b22;
+      --border: #21262d;
+      --border2: #30363d;
+      --blue: #58a6ff;
+      --blue-dim: #1c2d3f;
+      --green: #3fb950;
+      --green-dim: #1f3a23;
+      --purple: #a5a0f8;
+      --purple-dim: #1f1f2e;
+      --orange: #f8a14f;
+      --orange-dim: #2d1f10;
+      --text: #e1e4e8;
+      --text-muted: #8b949e;
+      --text-dim: #484f58;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f1117;
-      color: #e1e4e8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
     }
 
+    /* ── HEADER ── */
     header {
-      background: linear-gradient(135deg, #1a1f2e 0%, #0d1117 100%);
-      border-bottom: 1px solid #21262d;
-      padding: 20px 32px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      height: 56px;
       display: flex;
       align-items: center;
-      gap: 14px;
-    }
-    header svg { flex-shrink: 0; }
-    header h1 { font-size: 1.4rem; font-weight: 700; color: #58a6ff; }
-    header p { font-size: 0.8rem; color: #8b949e; margin-top: 2px; }
-
-    .container { max-width: 900px; margin: 0 auto; padding: 32px 20px; }
-
-    .search-box {
-      display: flex;
       gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo-mark {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, #1a6fff, #7b3ff8);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo-mark svg { display: block; }
+    .logo-text {
+      font-size: 1.1rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      color: var(--text);
+    }
+    .logo-sep {
+      width: 1px; height: 22px;
+      background: var(--border2);
+      margin: 0 12px;
+    }
+    .logo-sub {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+    }
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dot-live {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+    }
+    .live-label {
+      font-size: 0.72rem;
+      color: var(--green);
+      font-weight: 600;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── LAYOUT ── */
+    .layout {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px 24px;
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 24px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { order: -1; }
+    }
+
+    /* ── SEARCH ── */
+    .search-wrap {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
       margin-bottom: 20px;
     }
-    .search-box input {
+    .search-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .search-input-wrap {
       flex: 1;
-      padding: 14px 18px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 10px;
-      color: #e1e4e8;
-      font-size: 1rem;
+      position: relative;
+    }
+    .search-input-wrap svg {
+      position: absolute;
+      left: 14px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+    .search-row input {
+      width: 100%;
+      padding: 12px 16px 12px 42px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.95rem;
       outline: none;
-      transition: border-color .2s;
+      transition: border-color .15s, box-shadow .15s;
     }
-    .search-box input:focus { border-color: #58a6ff; }
-    .search-box input::placeholder { color: #484f58; }
+    .search-row input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(88,166,255,.1);
+    }
+    .search-row input::placeholder { color: var(--text-dim); }
 
-    .search-box button {
-      padding: 14px 24px;
-      background: #238636;
+    .btn-primary {
+      padding: 12px 22px;
+      background: linear-gradient(135deg, #1a6fff, #7b3ff8);
       border: none;
-      border-radius: 10px;
+      border-radius: 8px;
       color: #fff;
-      font-size: 1rem;
-      font-weight: 600;
+      font-size: 0.9rem;
+      font-weight: 700;
       cursor: pointer;
-      transition: background .2s;
       white-space: nowrap;
+      transition: opacity .15s;
+      letter-spacing: 0.03em;
     }
-    .search-box button:hover { background: #2ea043; }
-    .search-box button:disabled { background: #1f3a23; color: #4a6741; cursor: not-allowed; }
+    .btn-primary:hover { opacity: .88; }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
 
-    .controls {
+    .filter-row {
       display: flex;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 24px;
+      gap: 10px;
       flex-wrap: wrap;
     }
-    .controls label { font-size: 0.85rem; color: #8b949e; }
-    .controls select {
-      padding: 6px 10px;
-      background: #161b22;
-      border: 1px solid #30363d;
+    .filter-label { font-size: 0.78rem; color: var(--text-muted); }
+    .filter-select {
+      padding: 5px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
       border-radius: 6px;
-      color: #e1e4e8;
-      font-size: 0.85rem;
+      color: var(--text);
+      font-size: 0.78rem;
       cursor: pointer;
     }
-    .btn-kw {
+    .examples {
       margin-left: auto;
-      padding: 7px 14px;
-      background: transparent;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #58a6ff;
-      font-size: 0.85rem;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      padding: 4px 11px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 20px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
       cursor: pointer;
-      transition: border-color .2s, background .2s;
+      transition: border-color .15s, color .15s;
+      white-space: nowrap;
     }
-    .btn-kw:hover { border-color: #58a6ff; background: #1c2d3f; }
+    .chip:hover { border-color: var(--blue); color: var(--blue); }
 
+    /* ── STATUS ── */
     .status-bar {
-      font-size: 0.82rem;
-      color: #8b949e;
-      margin-bottom: 18px;
-      min-height: 18px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      min-height: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
-    .status-bar .pill {
-      display: inline-block;
-      background: #1c2d3f;
+    .pill {
+      display: inline-flex; align-items: center;
+      background: var(--blue-dim);
       border: 1px solid #1f4068;
-      border-radius: 12px;
+      border-radius: 10px;
       padding: 2px 10px;
-      margin-right: 6px;
       color: #79c0ff;
+      font-size: 0.75rem;
+      gap: 4px;
     }
 
-    .results { display: flex; flex-direction: column; gap: 14px; }
+    /* ── CARDS ── */
+    .results { display: flex; flex-direction: column; gap: 12px; }
 
     .card {
-      background: #161b22;
-      border: 1px solid #21262d;
+      background: var(--surface2);
+      border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 18px 20px;
-      transition: border-color .2s;
+      padding: 16px 18px;
+      transition: border-color .15s, transform .1s;
+      position: relative;
     }
-    .card:hover { border-color: #30363d; }
+    .card:hover {
+      border-color: var(--border2);
+      transform: translateY(-1px);
+    }
 
-    .card-meta {
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 9px;
+    }
+    .card-badges {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 8px;
+      gap: 6px;
       align-items: center;
     }
     .badge {
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       padding: 2px 8px;
       border-radius: 10px;
       font-weight: 600;
+      white-space: nowrap;
     }
-    .badge-source { background: #1f3a23; color: #7ee787; }
-    .badge-cat { background: #1c2d3f; color: #79c0ff; }
-    .badge-date { background: #1f1f28; color: #a8a0f8; }
-    .badge-score { background: #2d1f10; color: #f8a14f; }
+    .badge-source { background: var(--green-dim); color: #7ee787; }
+    .badge-cat    { background: var(--blue-dim);  color: #79c0ff; }
+    .badge-date   { background: var(--purple-dim); color: var(--purple); }
+
+    /* circular score */
+    .score-ring {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .score-ring svg { display: block; }
+    .score-pct {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--orange);
+    }
 
     .card h3 {
-      font-size: 1rem;
+      font-size: 0.95rem;
       font-weight: 600;
-      margin-bottom: 8px;
-      line-height: 1.4;
+      line-height: 1.45;
+      margin-bottom: 7px;
     }
-    .card h3 a { color: #58a6ff; text-decoration: none; }
+    .card h3 a { color: var(--blue); text-decoration: none; }
     .card h3 a:hover { text-decoration: underline; }
 
-    .card p { font-size: 0.875rem; color: #8b949e; line-height: 1.6; }
-
-    /* Keywords panel */
-    .kw-panel {
-      background: #161b22;
-      border: 1px solid #21262d;
-      border-radius: 10px;
-      padding: 20px;
-      margin-bottom: 24px;
+    .card-snippet {
+      font-size: 0.83rem;
+      color: var(--text-muted);
+      line-height: 1.65;
+      margin-bottom: 8px;
     }
-    .kw-panel h2 { font-size: 0.95rem; color: #8b949e; margin-bottom: 14px; }
-    .kw-list { display: flex; flex-wrap: wrap; gap: 8px; }
-    .kw-chip {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 20px;
-      padding: 5px 12px;
-      font-size: 0.82rem;
-      cursor: pointer;
-      transition: border-color .2s;
-    }
-    .kw-chip:hover { border-color: #58a6ff; }
-    .kw-chip .cnt {
-      background: #21262d;
-      border-radius: 10px;
-      padding: 1px 7px;
+    .match-reason {
       font-size: 0.75rem;
-      color: #8b949e;
+      color: var(--text-dim);
+      font-style: italic;
     }
 
+    /* skeleton */
+    .skeleton { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+    .skel-line {
+      background: var(--border2);
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .skel-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+
+    /* empty / error */
     .empty {
       text-align: center;
       padding: 60px 20px;
-      color: #484f58;
+      color: var(--text-dim);
     }
-    .empty svg { margin-bottom: 16px; opacity: .4; }
-    .empty p { font-size: 0.95rem; }
+    .empty svg { margin-bottom: 14px; opacity: .3; }
+    .empty p { font-size: 0.9rem; }
+    .empty .hint { font-size: 0.8rem; margin-top: 6px; color: var(--text-dim); }
 
-    .spinner {
-      display: inline-block;
-      width: 16px; height: 16px;
-      border: 2px solid #30363d;
-      border-top-color: #58a6ff;
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
-      vertical-align: middle;
-      margin-right: 6px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .examples {
-      margin-top: 10px;
+    .toast-error {
+      background: #2d1010;
+      border: 1px solid #6e1515;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #f47e7e;
+      font-size: 0.85rem;
       display: flex;
-      flex-wrap: wrap;
+      align-items: center;
       gap: 8px;
     }
-    .example-chip {
-      padding: 5px 12px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 20px;
-      font-size: 0.8rem;
-      color: #8b949e;
-      cursor: pointer;
-      transition: border-color .2s, color .2s;
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: sticky;
+      top: 76px;
     }
-    .example-chip:hover { border-color: #58a6ff; color: #58a6ff; }
+
+    .panel {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+    .toggle-group {
+      display: flex;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .toggle-btn {
+      padding: 3px 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      transition: background .15s, color .15s;
+    }
+    .toggle-btn.active {
+      background: var(--blue-dim);
+      color: var(--blue);
+    }
+
+    .panel-body { padding: 14px 16px; }
+
+    .kw-list { display: flex; flex-direction: column; gap: 6px; }
+    .kw-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background .12s;
+    }
+    .kw-row:hover { background: var(--surface); }
+    .kw-term {
+      font-size: 0.8rem;
+      color: var(--text);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-right: 8px;
+    }
+    .kw-bar-wrap {
+      width: 60px;
+      height: 4px;
+      background: var(--border2);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .kw-bar { height: 100%; background: var(--blue); border-radius: 2px; }
+    .kw-cnt {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      min-width: 28px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .kw-empty {
+      text-align: center;
+      padding: 20px;
+      color: var(--text-dim);
+      font-size: 0.8rem;
+    }
+
+    /* stats panel */
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8rem;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: var(--text-muted); }
+    .stat-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    /* spinner */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid var(--border2);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
 
 <header>
-  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2">
-    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-  </svg>
-  <div>
-    <h1>Neurotime Xəbər Axtarışı</h1>
-    <p>~20 000 məqalə · AI əsaslı semantik axtarış · 10–15 may 2026</p>
+  <div class="logo-mark">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/>
+    </svg>
+  </div>
+  <span class="logo-text">ORACULO</span>
+  <div class="logo-sep"></div>
+  <span class="logo-sub">AI News Intelligence · 20,915 articles · May 10–15 2026</span>
+  <div class="header-right">
+    <div class="dot-live"></div>
+    <span class="live-label">LIVE</span>
   </div>
 </header>
 
-<div class="container">
+<div class="layout">
 
-  <div class="search-box">
-    <input id="queryInput" type="text" placeholder="Mövzu, şirkət, şəxs, tarix… məs: SOCAR haqqında may 18-21 arasında" />
-    <button id="searchBtn" onclick="doSearch()">Axtar</button>
+  <!-- MAIN COLUMN -->
+  <div class="main">
+
+    <div class="search-wrap">
+      <div class="search-row">
+        <div class="search-input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input id="queryInput" type="text"
+            placeholder="Ask anything — e.g. SOCAR news on May 18-21, or negative bank stories" />
+        </div>
+        <button class="btn-primary" id="searchBtn" onclick="doSearch()">Search</button>
+      </div>
+
+      <div class="filter-row">
+        <span class="filter-label">Results:</span>
+        <select class="filter-select" id="topK">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+        </select>
+        <div class="examples">
+          <span class="chip" onclick="fillAndSearch('AccessBank haqqında xəbərlər')">AccessBank</span>
+          <span class="chip" onclick="fillAndSearch('SOCAR may 12-də')">SOCAR May 12</span>
+          <span class="chip" onclick="fillAndSearch('may 10-12 arasında gömrük xəbərləri')">Customs May 10–12</span>
+          <span class="chip" onclick="fillAndSearch('may 13-15 arasında mənfi bank xəbərləri')">Negative bank news</span>
+          <span class="chip" onclick="fillAndSearch('vergi iqtisadiyyat')">Tax / Economy</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="statusBar" class="status-bar"></div>
+    <div id="results" class="results"></div>
+
   </div>
 
-  <div class="controls">
-    <label>Nəticə sayı:</label>
-    <select id="topK">
-      <option value="5">5</option>
-      <option value="10" selected>10</option>
-      <option value="20">20</option>
-      <option value="50">50</option>
-    </select>
-    <button class="btn-kw" onclick="loadGlobalKeywords()">🔑 Qlobal açar sözlər</button>
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+
+    <!-- Keywords panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Top Keywords</span>
+        <div class="toggle-group">
+          <button class="toggle-btn active" id="kwToggleGlobal" onclick="setKwMode('global')">Global</button>
+          <button class="toggle-btn" id="kwToggleSearch" onclick="setKwMode('search')">Search</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div id="kwList" class="kw-list">
+          <div class="kw-empty">Run a search or load global keywords</div>
+        </div>
+        <div style="margin-top:12px">
+          <button class="chip" style="width:100%;text-align:center;padding:6px" onclick="loadGlobalKeywords()">
+            Load global keywords
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Session Stats</span>
+      </div>
+      <div class="panel-body" style="padding:12px 16px">
+        <div class="stat-row">
+          <span class="stat-label">Index size</span>
+          <span class="stat-val">20,915</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Coverage</span>
+          <span class="stat-val">May 10–15</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Queries run</span>
+          <span class="stat-val" id="statQueries">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Last topic</span>
+          <span class="stat-val" id="statTopic" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Avg results</span>
+          <span class="stat-val" id="statAvg">—</span>
+        </div>
+      </div>
+    </div>
+
   </div>
-
-  <div class="examples">
-    <span class="example-chip" onclick="fillAndSearch('AccessBank haqqında xəbərlər')">AccessBank haqqında xəbərlər</span>
-    <span class="example-chip" onclick="fillAndSearch('SOCAR may 12-də')">SOCAR may 12-də</span>
-    <span class="example-chip" onclick="fillAndSearch('may 10-12 arasında gömrük xəbərləri')">may 10-12 arasında gömrük</span>
-    <span class="example-chip" onclick="fillAndSearch('may 13-15 arasında mənfi bank xəbərləri')">mənfi bank xəbərləri</span>
-    <span class="example-chip" onclick="fillAndSearch('vergi iqtisadiyyat')">vergi / iqtisadiyyat</span>
-  </div>
-
-  <div style="height:28px"></div>
-
-  <div id="kwPanel" class="kw-panel" style="display:none">
-    <h2 id="kwTitle">🔑 Açar sözlər</h2>
-    <div id="kwList" class="kw-list"></div>
-  </div>
-
-  <div id="statusBar" class="status-bar"></div>
-  <div id="results" class="results"></div>
 
 </div>
 
 <script>
-const API = '';  // same origin
+const API = '';
+let _kwMode = 'global';
+let _lastQuery = '';
+let _queryCount = 0;
+let _totalResults = 0;
 
+function setKwMode(mode) {
+  _kwMode = mode;
+  document.getElementById('kwToggleGlobal').classList.toggle('active', mode === 'global');
+  document.getElementById('kwToggleSearch').classList.toggle('active', mode === 'search');
+  if (mode === 'global') loadGlobalKeywords();
+  else if (_lastQuery) loadSearchKeywords(_lastQuery);
+}
+
+// ── SEARCH ─────────────────────────────────────────────
 async function doSearch(query) {
   query = query || document.getElementById('queryInput').value.trim();
   if (!query) return;
   document.getElementById('queryInput').value = query;
+  _lastQuery = query;
 
   const btn = document.getElementById('searchBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Axtarılır…';
+  btn.innerHTML = '<span class="spinner" style="vertical-align:middle;margin-right:6px"></span>Searching…';
 
   const topK = parseInt(document.getElementById('topK').value);
   const statusBar = document.getElementById('statusBar');
   const resultsDiv = document.getElementById('results');
 
-  statusBar.innerHTML = '<span class="spinner"></span> Sorğu emal edilir…';
-  resultsDiv.innerHTML = '';
-  document.getElementById('kwPanel').style.display = 'none';
+  statusBar.innerHTML = '<span class="spinner"></span><span style="margin-left:6px">Processing query…</span>';
+  resultsDiv.innerHTML = renderSkeletons(3);
 
   try {
     const res = await fetch(`${API}/api/search`, {
@@ -294,100 +612,169 @@ async function doSearch(query) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, top_k: topK })
     });
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
     const data = await res.json();
 
-    const params = data.params || {};
-    const articles = data.results || [];
-    const total = data.total_in_range || 0;
+    const params   = data.params   || {};
+    const articles = data.results  || [];
+    const total    = data.total_in_range || 0;
 
-    let statusHtml = `<strong>${articles.length}</strong> nəticə`;
-    if (total) statusHtml += ` (filtrə uyğun: ${total})`;
-    if (params.topic) statusHtml += ` &nbsp;·&nbsp; <span class="pill">🎯 ${params.topic}</span>`;
+    // update stats
+    _queryCount++;
+    _totalResults += articles.length;
+    document.getElementById('statQueries').textContent = _queryCount;
+    document.getElementById('statTopic').textContent   = params.topic || query;
+    document.getElementById('statAvg').textContent     = (_totalResults / _queryCount).toFixed(1);
+
+    // status bar
+    let statusHtml = `<strong>${articles.length}</strong> results`;
+    if (total) statusHtml += `<span style="color:var(--text-dim)"> of ${total} matching</span>`;
+    if (params.topic) statusHtml += `<span class="pill">🎯 ${params.topic}</span>`;
     if (params.date_from || params.date_to) {
-      const df = params.date_from || '…';
-      const dt = params.date_to || '…';
-      statusHtml += `<span class="pill">📅 ${df} → ${dt}</span>`;
+      statusHtml += `<span class="pill">📅 ${params.date_from||'…'} → ${params.date_to||'…'}</span>`;
+    }
+    if (params.sentiment) {
+      const s = params.sentiment === 'negative' ? '🔴' : '🟢';
+      statusHtml += `<span class="pill">${s} ${params.sentiment}</span>`;
     }
     statusBar.innerHTML = statusHtml;
 
     if (!articles.length) {
       resultsDiv.innerHTML = `
         <div class="empty">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          <p>Heç bir nəticə tapılmadı. Fərqli açar sözlər sınayın.</p>
+          <p>No results found</p>
+          <p class="hint">Try different keywords or broaden the date range</p>
         </div>`;
-      return;
+    } else {
+      resultsDiv.innerHTML = articles.map(renderCard).join('');
     }
 
-    resultsDiv.innerHTML = articles.map(a => {
-      const date = (a.published_at || '').slice(0, 10);
-      const snippet = (a.snippet || '').slice(0, 220);
-      const score = a.relevance_score ? (a.relevance_score * 100).toFixed(0) + '%' : '';
-      return `
-        <div class="card">
-          <div class="card-meta">
-            ${a.source ? `<span class="badge badge-source">${a.source}</span>` : ''}
-            ${a.category ? `<span class="badge badge-cat">${a.category}</span>` : ''}
-            ${date ? `<span class="badge badge-date">${date}</span>` : ''}
-            ${score ? `<span class="badge badge-score">⚡ ${score}</span>` : ''}
-          </div>
-          <h3><a href="${a.url}" target="_blank" rel="noopener">${a.title || 'Başlıq yoxdur'}</a></h3>
-          <p>${snippet}${snippet.length === 220 ? '…' : ''}</p>
-        </div>`;
-    }).join('');
-
-    // Show keyword button for search results
-    document.getElementById('kwPanel').style.display = 'none';
-    loadSearchKeywords(query);
+    // auto-load search keywords in sidebar
+    if (_kwMode === 'search') loadSearchKeywords(query);
 
   } catch (err) {
-    statusBar.innerHTML = '❌ Xəta baş verdi: ' + err.message;
+    statusBar.innerHTML = '';
+    resultsDiv.innerHTML = `
+      <div class="toast-error">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        Search failed: ${err.message}. Check your connection and try again.
+      </div>`;
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Axtar';
+    btn.textContent = 'Search';
   }
 }
 
-async function loadGlobalKeywords() {
-  const panel = document.getElementById('kwPanel');
-  const title = document.getElementById('kwTitle');
-  const list = document.getElementById('kwList');
-  panel.style.display = 'block';
-  title.textContent = '⏳ Yüklənir…';
-  list.innerHTML = '';
+// ── CARD RENDER ────────────────────────────────────────
+function renderCard(a) {
+  const date    = (a.published_at || '').slice(0, 10);
+  const snippet = (a.snippet || '').slice(0, 200);
+  const pct     = a.relevance_score ? Math.round(a.relevance_score * 100) : 0;
+  const radius  = 16;
+  const circ    = 2 * Math.PI * radius;
+  const dash    = (pct / 100) * circ;
 
-  const res = await fetch(`${API}/api/keywords?top_n=30`);
-  const data = await res.json();
-  renderKeywords(data.keywords, '🔑 Qlobal açar sözlər (bütün dataset)');
+  // pick ring color by score
+  const ringColor = pct >= 65 ? '#3fb950' : pct >= 45 ? '#f8a14f' : '#58a6ff';
+
+  const matchReason = pct >= 65
+    ? 'Strong semantic match to query topic'
+    : pct >= 45
+    ? 'Partial relevance — related entities found'
+    : 'Contextually related article';
+
+  return `
+    <div class="card">
+      <div class="card-top">
+        <div class="card-badges">
+          ${a.source   ? `<span class="badge badge-source">${a.source}</span>` : ''}
+          ${a.category ? `<span class="badge badge-cat">${a.category}</span>` : ''}
+          ${date       ? `<span class="badge badge-date">${date}</span>` : ''}
+        </div>
+        ${pct ? `
+        <div class="score-ring" title="AI Relevance Score">
+          <svg width="40" height="40" viewBox="0 0 40 40">
+            <circle cx="20" cy="20" r="${radius}" fill="none" stroke="#21262d" stroke-width="3"/>
+            <circle cx="20" cy="20" r="${radius}" fill="none" stroke="${ringColor}" stroke-width="3"
+              stroke-dasharray="${dash.toFixed(1)} ${circ.toFixed(1)}"
+              stroke-linecap="round"
+              transform="rotate(-90 20 20)"/>
+            <text x="20" y="24" text-anchor="middle" font-size="9" font-weight="700" fill="${ringColor}">${pct}%</text>
+          </svg>
+        </div>` : ''}
+      </div>
+      <h3><a href="${a.url}" target="_blank" rel="noopener">${a.title || 'No title'}</a></h3>
+      <p class="card-snippet">${snippet}${snippet.length >= 200 ? '…' : ''}</p>
+      <p class="match-reason">⚡ ${matchReason}</p>
+    </div>`;
+}
+
+// ── SKELETONS ─────────────────────────────────────────
+function renderSkeletons(n) {
+  return Array.from({length: n}, () => `
+    <div class="skel-card skeleton">
+      <div class="skel-line" style="width:30%;height:14px"></div>
+      <div class="skel-line" style="width:80%;height:16px;margin-top:10px"></div>
+      <div class="skel-line" style="width:95%;height:12px"></div>
+      <div class="skel-line" style="width:70%;height:12px"></div>
+    </div>`).join('');
+}
+
+// ── KEYWORDS ──────────────────────────────────────────
+async function loadGlobalKeywords() {
+  renderKwLoading();
+  try {
+    const res  = await fetch(`${API}/api/keywords?top_n=20`);
+    const data = await res.json();
+    renderKeywords(data.keywords);
+  } catch { renderKwError(); }
 }
 
 async function loadSearchKeywords(query) {
-  const res = await fetch(`${API}/api/keywords/search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, top_k: 50 })
-  });
-  const data = await res.json();
-  if (data.keywords && data.keywords.length) {
-    renderKeywords(data.keywords, '🔑 Bu nəticələrdə ən çox rast gəlinən:');
+  renderKwLoading();
+  try {
+    const res = await fetch(`${API}/api/keywords/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, top_k: 50 })
+    });
+    const data = await res.json();
+    renderKeywords(data.keywords);
+  } catch { renderKwError(); }
+}
+
+function renderKeywords(kws) {
+  if (!kws || !kws.length) {
+    document.getElementById('kwList').innerHTML = '<div class="kw-empty">No keywords found</div>';
+    return;
   }
+  const max = kws[0].count || 1;
+  document.getElementById('kwList').innerHTML = kws.map(k => `
+    <div class="kw-row" onclick="fillAndSearch('${k.term.replace(/'/g,"\\'")}')">
+      <span class="kw-term">${k.term}</span>
+      <div class="kw-bar-wrap">
+        <div class="kw-bar" style="width:${Math.round(k.count/max*100)}%"></div>
+      </div>
+      <span class="kw-cnt">${k.count}</span>
+    </div>`).join('');
 }
 
-function renderKeywords(keywords, titleText) {
-  const panel = document.getElementById('kwPanel');
-  const title = document.getElementById('kwTitle');
-  const list = document.getElementById('kwList');
-  panel.style.display = 'block';
-  title.textContent = titleText;
-  list.innerHTML = keywords.map(k =>
-    `<span class="kw-chip" onclick="fillAndSearch('${k.term.replace(/'/g, "\\'")}')">
-      ${k.term} <span class="cnt">${k.count}</span>
-    </span>`
-  ).join('');
+function renderKwLoading() {
+  document.getElementById('kwList').innerHTML = `
+    <div class="kw-empty">
+      <span class="spinner" style="display:inline-block;margin-bottom:6px"></span><br>Loading…
+    </div>`;
+}
+function renderKwError() {
+  document.getElementById('kwList').innerHTML = '<div class="kw-empty" style="color:#f47e7e">Failed to load</div>';
 }
 
+// ── UTILS ─────────────────────────────────────────────
 function fillAndSearch(q) {
   document.getElementById('queryInput').value = q;
   doSearch(q);
