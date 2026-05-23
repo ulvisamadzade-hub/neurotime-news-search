@@ -2,11 +2,13 @@ import os
 import json
 import logging
 import pickle
+import re
 from datetime import datetime, date
 
 import numpy as np
 import faiss
 from openai import OpenAI
+from rank_bm25 import BM25Okapi
 from dotenv import load_dotenv
 from banks import detect_bank
 
@@ -14,29 +16,58 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger(__name__)
 
-ENTITY_FILTER_MIN = 5   # fall back to full set if entity filter yields fewer than this
-MIN_SCORE = 0.40        # absolute floor — results below this are dropped
-SCORE_GAP = 0.08        # cut results when consecutive score drops by more than this
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "index.faiss")
 META_PATH = os.path.join(BASE_DIR, "metadata.pkl")
 
+ENTITY_FILTER_MIN = 5   # fall back to full set if entity filter yields fewer than this
+MIN_SCORE = 0.40        # semantic score floor — results below this are dropped
+SCORE_GAP = 0.08        # cut when consecutive semantic score drops by more than this
+RRF_K = 60              # RRF constant (higher = less sensitive to top ranks)
+CANDIDATE_MULTIPLIER = 5  # fetch top_k * this from each retriever before fusion
+HYDE_MAX_TOKENS = 200   # max tokens for hypothetical document
+
 _index = None
 _metadata: list[dict] = []
+_bm25: BM25Okapi | None = None
 
+
+# ---------------------------------------------------------------------------
+# Tokeniser (shared by BM25 index build and query-time scoring)
+# ---------------------------------------------------------------------------
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase + extract alphabetic tokens (handles Azerbaijani chars)."""
+    return re.findall(r"[a-zəüöğşçıa-zа-яё]{2,}", text.lower())
+
+
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
 
 def load_index():
-    global _index, _metadata
+    global _index, _metadata, _bm25
     logger.info("Loading FAISS index from %s", INDEX_PATH)
     _index = faiss.read_index(INDEX_PATH)
     with open(META_PATH, "rb") as f:
         _metadata = pickle.load(f)
     logger.info("Index loaded: %d vectors, %d articles", _index.ntotal, len(_metadata))
 
+    logger.info("Building BM25 index over %d articles…", len(_metadata))
+    corpus = [
+        _tokenize(f"{m.get('title', '')} {m.get('snippet', '')}")
+        for m in _metadata
+    ]
+    _bm25 = BM25Okapi(corpus)
+    logger.info("BM25 index ready")
+
+
+# ---------------------------------------------------------------------------
+# GPT helpers
+# ---------------------------------------------------------------------------
 
 def parse_query(query: str) -> dict:
-    """Use GPT-4o-mini to extract structured parameters from a natural-language query."""
+    """Extract structured search params from a natural-language query."""
     system = (
         "You are a query parser for an Azerbaijani news search engine. "
         "The dataset covers May 10–15, 2026. "
@@ -63,12 +94,59 @@ Return only valid JSON with these 5 keys."""
     try:
         parsed = json.loads(response.choices[0].message.content)
         logger.info("Query parsed — topic=%r date_from=%s date_to=%s sentiment=%s",
-                    parsed.get("topic"), parsed.get("date_from"), parsed.get("date_to"), parsed.get("sentiment"))
+                    parsed.get("topic"), parsed.get("date_from"),
+                    parsed.get("date_to"), parsed.get("sentiment"))
         return parsed
     except Exception as e:
         logger.warning("Query parse failed (%s), falling back to raw query", e)
-        return {"topic": query, "date_from": None, "date_to": None, "sentiment": None, "category": None}
+        return {"topic": query, "date_from": None, "date_to": None,
+                "sentiment": None, "category": None}
 
+
+def generate_hyde(topic: str) -> str:
+    """Generate a short hypothetical Azerbaijani news article for the topic.
+
+    Embedding this paragraph instead of the raw query produces a vector that
+    is semantically much closer to real articles on the same subject.
+    """
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Sən Azərbaycan dilində xəbər məqaləsi yazan peşəkar jurnalistsən. "
+                    "Verilən mövzu haqqında qısa, real bir xəbər mətni yaz.\n\n"
+                    "Azərbaycanda əsas qurumlar:\n"
+                    "- Neft: SOCAR (Azərbaycan Dövlət Neft Şirkəti)\n"
+                    "- Dövlət bankı: ABB (Azərbaycan Beynəlxalq Bankı), Kapital Bank, Xalq Bank\n"
+                    "- Hava yolu: AZAL (Azərbaycan Hava Yolları)\n"
+                    "- Mərkəzi Bank: Azərbaycan Mərkəzi Bankı\n"
+                    "- Şəhər: Bakı, Gəncə, Sumqayıt, Naxçıvan\n"
+                    "Mövzu bu qurumlara aid olduqda onları mütləq xəbərdə işlət."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f'Mövzu: "{topic}"\n\n'
+                    "3-4 cümlədən ibarət Azərbaycan xəbər məqaləsi yaz. "
+                    "Konkret şirkət, qurum və şəxs adları işlət. "
+                    "Rəsmi xəbər dili istifadə et."
+                ),
+            },
+        ],
+        max_tokens=HYDE_MAX_TOKENS,
+        temperature=0.3,
+    )
+    doc = response.choices[0].message.content.strip()
+    logger.info("HyDE document: %s…", doc[:120])
+    return doc
+
+
+# ---------------------------------------------------------------------------
+# Embedding + date helpers
+# ---------------------------------------------------------------------------
 
 def _embed(text: str) -> np.ndarray:
     response = client.embeddings.create(model="text-embedding-3-small", input=[text])
@@ -88,44 +166,37 @@ def _to_date(val) -> date | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Core search
+# ---------------------------------------------------------------------------
+
 def search(query: str, top_k: int = 10) -> dict:
     if _index is None:
         load_index()
 
+    # 1. Parse query
     params = parse_query(query)
     topic = params.get("topic") or query
     date_from = _to_date(params.get("date_from"))
     date_to = _to_date(params.get("date_to"))
-    cat_hint = (params.get("category") or "").strip().lower()
 
-    # --- date + optional category filter ---
+    # 2. Date filter
     filtered_indices = []
     for i, m in enumerate(_metadata):
         dt = m.get("created_at")
-        if dt is not None:
-            try:
-                d = dt.date() if hasattr(dt, "date") else _to_date(dt)
-            except Exception:
-                d = None
-        else:
+        try:
+            d = dt.date() if hasattr(dt, "date") else _to_date(dt)
+        except Exception:
             d = None
-
         if date_from and (d is None or d < date_from):
             continue
         if date_to and (d is None or d > date_to):
             continue
-
-        if cat_hint:
-            article_cat = str(m.get("category", "")).lower()
-            if cat_hint not in article_cat:
-                # soft skip — only skip if category is explicitly set and doesn't match
-                pass  # don't hard-filter on category; let vector score decide
-
         filtered_indices.append(i)
 
     total_in_range = len(filtered_indices)
 
-    # --- bank entity filter ---
+    # 3. Bank entity filter
     bank = detect_bank(query)
     entity_applied = False
     if bank and filtered_indices:
@@ -133,79 +204,96 @@ def search(query: str, top_k: int = 10) -> dict:
         entity_indices = [
             i for i in filtered_indices
             if any(
-                alias in (_metadata[i].get("title", "") + " " + _metadata[i].get("snippet", "")).lower()
+                alias in (
+                    _metadata[i].get("title", "") + " " + _metadata[i].get("snippet", "")
+                ).lower()
                 for alias in aliases_lower
             )
         ]
         if len(entity_indices) == 0:
-            # Bank is known but has no coverage in this dataset — return nothing
             logger.info("Bank entity filter: %r → 0 articles, returning empty", bank["canonical"])
             params["entity"] = bank["canonical"]
             return {"results": [], "params": params, "total_in_range": 0}
-        elif len(entity_indices) >= ENTITY_FILTER_MIN:
-            logger.info(
-                "Bank entity filter: %r → %d articles (from %d)",
-                bank["canonical"], len(entity_indices), len(filtered_indices),
-            )
-            filtered_indices = entity_indices
-            entity_applied = True
-            params["entity"] = bank["canonical"]
         else:
-            # Too few matches — use them directly without vector search cutoff
-            logger.info(
-                "Bank entity filter: %r → %d articles (small set, using all)",
-                bank["canonical"], len(entity_indices),
-            )
+            logger.info("Bank entity filter: %r → %d articles (from %d)",
+                        bank["canonical"], len(entity_indices), len(filtered_indices))
             filtered_indices = entity_indices
             entity_applied = True
             params["entity"] = bank["canonical"]
 
-    logger.info("Search — query=%r filtered=%d/%d entity_filter=%s",
-                query, len(filtered_indices), len(_metadata), entity_applied)
+    logger.info("Search — query=%r candidates=%d entity_filter=%s",
+                query, len(filtered_indices), entity_applied)
 
     if not filtered_indices:
-        logger.info("No articles matched date filter")
         return {"results": [], "params": params, "total_in_range": 0}
 
-    # --- embed query ---
-    query_vec = _embed(topic)
+    # 4. HyDE — generate hypothetical article, embed it
+    hyde_doc = generate_hyde(topic)
+    query_vec = _embed(hyde_doc)
 
-    # --- vector search over filtered subset ---
-    k = min(top_k, len(filtered_indices))
+    # 5. Semantic retrieval via FAISS over filtered subset
+    n_candidates = min(top_k * CANDIDATE_MULTIPLIER, len(filtered_indices))
 
     if len(filtered_indices) < len(_metadata):
-        # reconstruct vectors for the filtered subset
         sub_vecs = np.zeros((len(filtered_indices), _index.d), dtype=np.float32)
         for j, idx in enumerate(filtered_indices):
             _index.reconstruct(idx, sub_vecs[j])
         sub_index = faiss.IndexFlatIP(_index.d)
         sub_index.add(sub_vecs)
-        scores, local_ids = sub_index.search(query_vec, k)
-        result_indices = [filtered_indices[lid] for lid in local_ids[0] if lid >= 0]
-        result_scores = [float(s) for s in scores[0] if s > -1]
+        scores, local_ids = sub_index.search(query_vec, n_candidates)
+        sem_indices = [filtered_indices[lid] for lid in local_ids[0] if lid >= 0]
+        sem_scores = {filtered_indices[lid]: float(s)
+                      for lid, s in zip(local_ids[0], scores[0]) if lid >= 0}
     else:
-        scores, ids = _index.search(query_vec, k)
-        result_indices = [i for i in ids[0] if i >= 0]
-        result_scores = [float(s) for s in scores[0]]
+        scores, ids = _index.search(query_vec, n_candidates)
+        sem_indices = [i for i in ids[0] if i >= 0]
+        sem_scores = {i: float(s) for i, s in zip(ids[0], scores[0]) if i >= 0}
 
+    # 6. BM25 retrieval over filtered subset
+    hyde_tokens = _tokenize(hyde_doc)
+    all_bm25 = _bm25.get_scores(hyde_tokens)
+    bm25_filtered = sorted(
+        [(idx, all_bm25[idx]) for idx in filtered_indices],
+        key=lambda x: x[1], reverse=True
+    )[:n_candidates]
+    bm25_indices = [idx for idx, _ in bm25_filtered]
+    bm25_scores = {idx: score for idx, score in bm25_filtered}
+
+    # 7. Reciprocal Rank Fusion
+    sem_rank = {idx: rank for rank, idx in enumerate(sem_indices)}
+    bm25_rank = {idx: rank for rank, (idx, _) in enumerate(bm25_filtered)}
+
+    all_candidates = set(sem_indices) | set(bm25_indices)
+    rrf_scores = {
+        idx: (1 / (RRF_K + sem_rank.get(idx, n_candidates)) +
+              1 / (RRF_K + bm25_rank.get(idx, n_candidates)))
+        for idx in all_candidates
+    }
+
+    # For entity-filtered results, semantic score is more reliable than BM25
+    # (entity filter already guarantees the article mentions the bank)
+    if entity_applied:
+        ranked = sorted(sem_scores.keys(), key=lambda x: sem_scores[x], reverse=True)[:top_k]
+    else:
+        ranked = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)[:top_k]
+
+    # 8. Build result list (use semantic score for relevance threshold)
     results = []
-    for idx, score in zip(result_indices, result_scores):
+    for idx in ranked:
         m = _metadata[idx]
         dt = m.get("created_at")
         published = str(dt)[:19] if dt is not None else ""
-        results.append(
-            {
-                "title": m.get("title", ""),
-                "source": m.get("source", ""),
-                "url": m.get("url", ""),
-                "published_at": published,
-                "snippet": m.get("snippet", ""),
-                "category": m.get("category", ""),
-                "relevance_score": round(score, 4),
-            }
-        )
+        results.append({
+            "title": m.get("title", ""),
+            "source": m.get("source", ""),
+            "url": m.get("url", ""),
+            "published_at": published,
+            "snippet": m.get("snippet", ""),
+            "category": m.get("category", ""),
+            "relevance_score": round(sem_scores.get(idx, 0.0), 4),
+        })
 
-    # --- relevance filter: minimum score + gap detection ---
+    # 9. Relevance filter: min score + gap detection on semantic scores
     results = [r for r in results if r["relevance_score"] >= MIN_SCORE]
     if len(results) > 1:
         cutoff = len(results)
@@ -215,6 +303,6 @@ def search(query: str, top_k: int = 10) -> dict:
                 break
         results = results[:cutoff]
 
-    logger.info("Returning %d results after relevance filter (top score=%.4f)",
+    logger.info("Returning %d results after HyDE+BM25+RRF (top semantic=%.4f)",
                 len(results), results[0]["relevance_score"] if results else 0)
     return {"results": results, "params": params, "total_in_range": total_in_range}
