@@ -21,11 +21,12 @@ INDEX_PATH = os.path.join(BASE_DIR, "index.faiss")
 META_PATH = os.path.join(BASE_DIR, "metadata.pkl")
 
 ENTITY_FILTER_MIN = 5   # fall back to full set if entity filter yields fewer than this
-MIN_SCORE = 0.40        # semantic score floor — results below this are dropped
+MIN_SCORE = 0.38        # semantic score floor — results below this are dropped
 SCORE_GAP = 0.08        # cut when consecutive semantic score drops by more than this
 RRF_K = 60              # RRF constant (higher = less sensitive to top ranks)
 CANDIDATE_MULTIPLIER = 5  # fetch top_k * this from each retriever before fusion
 HYDE_MAX_TOKENS = 200   # max tokens for hypothetical document
+RERANK_CANDIDATES = 20  # how many candidates to send to GPT re-ranker
 
 _index = None
 _metadata: list[dict] = []
@@ -145,6 +146,58 @@ def generate_hyde(topic: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# GPT Re-ranker
+# ---------------------------------------------------------------------------
+
+def rerank(query: str, candidates: list[dict], sentiment: str | None) -> list[dict]:
+    """Use GPT-4o-mini to verify which candidates are genuinely about the query.
+
+    Sends article titles + short snippets to GPT and asks it to return only
+    the indices that are directly relevant. Also applies sentiment filtering
+    when the user asked for positive/negative news.
+    """
+    if not candidates:
+        return candidates
+
+    articles_text = "\n\n".join(
+        f"[{i}] Title: {a['title']}\nSnippet: {a['snippet'][:200]}"
+        for i, a in enumerate(candidates)
+    )
+
+    sentiment_line = ""
+    if sentiment == "negative":
+        sentiment_line = "Only include articles with negative, risky, critical, or alarming content.\n"
+    elif sentiment == "positive":
+        sentiment_line = "Only include articles with positive, favorable, or optimistic content.\n"
+
+    prompt = f"""You are a relevance judge for an Azerbaijani news search engine.
+
+User query: "{query}"
+{sentiment_line}
+Below are {len(candidates)} candidate articles. Return ONLY the indices of articles that are DIRECTLY and GENUINELY about the query topic. Be strict — exclude articles that merely mention a related keyword in passing without the article being truly about the topic.
+
+{articles_text}
+
+Return a JSON object with a single key "relevant" containing a list of integer indices (0-based). Example: {{"relevant": [0, 3, 7]}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=200,
+        )
+        result = json.loads(response.choices[0].message.content)
+        relevant_indices = [i for i in result.get("relevant", []) if isinstance(i, int) and i < len(candidates)]
+        logger.info("Re-ranker: %d/%d candidates kept", len(relevant_indices), len(candidates))
+        return [candidates[i] for i in relevant_indices]
+    except Exception as e:
+        logger.warning("Re-ranker failed (%s), returning all candidates", e)
+        return candidates
+
+
+# ---------------------------------------------------------------------------
 # Embedding + date helpers
 # ---------------------------------------------------------------------------
 
@@ -250,8 +303,15 @@ def search(query: str, top_k: int = 10) -> dict:
         sem_scores = {i: float(s) for i, s in zip(ids[0], scores[0]) if i >= 0}
 
     # 6. BM25 retrieval over filtered subset
+    # For Azerbaijani topics (contain AZ-specific chars), use the raw topic tokens
+    # so BM25 targets specific query terms. For English topics, use HyDE tokens
+    # because the Azerbaijani hypothetical article bridges the language gap.
+    _AZ_CHARS = set('əüöğşçı')
+    query_tokens = _tokenize(topic)
     hyde_tokens = _tokenize(hyde_doc)
-    all_bm25 = _bm25.get_scores(hyde_tokens)
+    topic_is_azerbaijani = any(c in _AZ_CHARS for t in query_tokens for c in t)
+    bm25_tokens = query_tokens if (topic_is_azerbaijani and query_tokens) else hyde_tokens
+    all_bm25 = _bm25.get_scores(bm25_tokens)
     bm25_filtered = sorted(
         [(idx, all_bm25[idx]) for idx in filtered_indices],
         key=lambda x: x[1], reverse=True
@@ -270,39 +330,48 @@ def search(query: str, top_k: int = 10) -> dict:
         for idx in all_candidates
     }
 
-    # For entity-filtered results, semantic score is more reliable than BM25
-    # (entity filter already guarantees the article mentions the bank)
+    # 8. Rank candidates
     if entity_applied:
-        ranked = sorted(sem_scores.keys(), key=lambda x: sem_scores[x], reverse=True)[:top_k]
+        ranked = sorted(sem_scores.keys(), key=lambda x: sem_scores[x], reverse=True)
     else:
-        ranked = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)[:top_k]
+        ranked = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
 
-    # 8. Build result list (use semantic score for relevance threshold)
-    results = []
-    for idx in ranked:
+    # 9. Build candidate list for re-ranker (top RERANK_CANDIDATES)
+    # Normalise BM25 scores so they're in a comparable range to semantic scores
+    max_bm25 = max(bm25_scores.values()) if bm25_scores else 1.0
+    candidates = []
+    for idx in ranked[:RERANK_CANDIDATES]:
         m = _metadata[idx]
         dt = m.get("created_at")
         published = str(dt)[:19] if dt is not None else ""
-        results.append({
+        sem_s = sem_scores.get(idx, 0.0)
+        bm25_s = bm25_scores.get(idx, 0.0)
+        # Use semantic score when available; fall back to normalised BM25 for
+        # lexical-only hits so they survive the post-rerank quality check.
+        display_score = round(sem_s if sem_s > 0.0 else (bm25_s / max_bm25) * 0.3, 4)
+        candidates.append({
             "title": m.get("title", ""),
             "source": m.get("source", ""),
             "url": m.get("url", ""),
             "published_at": published,
             "snippet": m.get("snippet", ""),
             "category": m.get("category", ""),
-            "relevance_score": round(sem_scores.get(idx, 0.0), 4),
+            "relevance_score": display_score,
+            "_idx": idx,
         })
 
-    # 9. Relevance filter: min score + gap detection on semantic scores
-    results = [r for r in results if r["relevance_score"] >= MIN_SCORE]
-    if len(results) > 1:
-        cutoff = len(results)
-        for i in range(1, len(results)):
-            if results[i - 1]["relevance_score"] - results[i]["relevance_score"] > SCORE_GAP:
-                cutoff = i
-                break
-        results = results[:cutoff]
+    # 10. GPT re-ranking — verify each candidate is genuinely relevant
+    sentiment = params.get("sentiment")
+    reranked = rerank(query, candidates, sentiment)
 
-    logger.info("Returning %d results after HyDE+BM25+RRF (top semantic=%.4f)",
+    # 11. Trust the re-ranker as the sole quality gate
+    results = reranked
+
+    # 12. Return top_k
+    results = results[:top_k]
+    for r in results:
+        r.pop("_idx", None)
+
+    logger.info("Returning %d results after re-ranking (top semantic=%.4f)",
                 len(results), results[0]["relevance_score"] if results else 0)
     return {"results": results, "params": params, "total_in_range": total_in_range}
