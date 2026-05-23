@@ -14,7 +14,9 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 logger = logging.getLogger(__name__)
 
-ENTITY_FILTER_MIN = 5  # fall back to full set if entity filter yields fewer than this
+ENTITY_FILTER_MIN = 5   # fall back to full set if entity filter yields fewer than this
+MIN_SCORE = 0.40        # absolute floor — results below this are dropped
+SCORE_GAP = 0.08        # cut results when consecutive score drops by more than this
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "index.faiss")
@@ -135,7 +137,12 @@ def search(query: str, top_k: int = 10) -> dict:
                 for alias in aliases_lower
             )
         ]
-        if len(entity_indices) >= ENTITY_FILTER_MIN:
+        if len(entity_indices) == 0:
+            # Bank is known but has no coverage in this dataset — return nothing
+            logger.info("Bank entity filter: %r → 0 articles, returning empty", bank["canonical"])
+            params["entity"] = bank["canonical"]
+            return {"results": [], "params": params, "total_in_range": 0}
+        elif len(entity_indices) >= ENTITY_FILTER_MIN:
             logger.info(
                 "Bank entity filter: %r → %d articles (from %d)",
                 bank["canonical"], len(entity_indices), len(filtered_indices),
@@ -144,10 +151,14 @@ def search(query: str, top_k: int = 10) -> dict:
             entity_applied = True
             params["entity"] = bank["canonical"]
         else:
+            # Too few matches — use them directly without vector search cutoff
             logger.info(
-                "Bank entity filter for %r yielded only %d results — skipping filter",
+                "Bank entity filter: %r → %d articles (small set, using all)",
                 bank["canonical"], len(entity_indices),
             )
+            filtered_indices = entity_indices
+            entity_applied = True
+            params["entity"] = bank["canonical"]
 
     logger.info("Search — query=%r filtered=%d/%d entity_filter=%s",
                 query, len(filtered_indices), len(_metadata), entity_applied)
@@ -194,5 +205,16 @@ def search(query: str, top_k: int = 10) -> dict:
             }
         )
 
-    logger.info("Returning %d results (top score=%.4f)", len(results), results[0]["relevance_score"] if results else 0)
+    # --- relevance filter: minimum score + gap detection ---
+    results = [r for r in results if r["relevance_score"] >= MIN_SCORE]
+    if len(results) > 1:
+        cutoff = len(results)
+        for i in range(1, len(results)):
+            if results[i - 1]["relevance_score"] - results[i]["relevance_score"] > SCORE_GAP:
+                cutoff = i
+                break
+        results = results[:cutoff]
+
+    logger.info("Returning %d results after relevance filter (top score=%.4f)",
+                len(results), results[0]["relevance_score"] if results else 0)
     return {"results": results, "params": params, "total_in_range": total_in_range}
